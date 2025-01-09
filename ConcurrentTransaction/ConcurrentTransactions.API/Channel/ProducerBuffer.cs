@@ -8,13 +8,14 @@ public class ProducerBuffer
     public ConcurrentDictionary<int, bool> OccupiedClients { get; }
     public ConcurrentQueue<TransactionRequest> Queue { get; }
     private readonly SemaphoreSlim _signal;
-
+    public event Action OnItemEnqueued;
     public ProducerBuffer()
     {
         Queue = new ConcurrentQueue<TransactionRequest>();
         OccupiedClients = new ConcurrentDictionary<int, bool>();
         //enables concurrency
         _signal = new SemaphoreSlim(0);
+        //TODO::Maybe add a buffer cap 
     }
 
     public bool Push(TransactionRequest transactionRequest)
@@ -24,9 +25,10 @@ public class ProducerBuffer
             return false;
         }
 
-        transactionRequest.DateTime = DateTime.Now;
+        transactionRequest.TimeStamp = DateTime.Now;
         Queue.Enqueue(transactionRequest);
         _signal.Release();
+        OnItemEnqueued?.Invoke(); // Tell Channel that a queue can be consumed
         return true;
     }
 
@@ -40,5 +42,18 @@ public class ProducerBuffer
 
         return null;
     }
+    public bool IsIbanInPendingTransactionBeforeCommit(string creditorAccount)
+    {
+        return Queue.Any(t => t.CreditorAccount.Equals(creditorAccount, StringComparison.OrdinalIgnoreCase));
+    }
 
+    public void WaitForItem(CancellationToken cancellationToken = default)
+    {
+        _signal.Wait(cancellationToken);
+    }
+
+    public bool TryWaitForItem(TimeSpan timeout)
+    {
+        return _signal.Wait(timeout);
+    }
 }
