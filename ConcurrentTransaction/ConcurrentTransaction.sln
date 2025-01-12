@@ -1,11 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.12.35527.113 d17.12
+VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{4316898A-62DB-44F5-8756-AF548FF7AAA0}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConcurrentTransactions.API", "ConcurrentTransactions.API\ConcurrentTransactions.API.csproj", "{2CEA609E-1EB3-4083-88EA-243C9DBF878C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestConcurrentAPI", "Test.API\TestConcurrentAPI\TestConcurrentAPI.csproj", "{71BB4DFE-F722-45C4-943E-7A2C5CAFE551}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -17,6 +19,10 @@ Global
 		{2CEA609E-1EB3-4083-88EA-243C9DBF878C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2CEA609E-1EB3-4083-88EA-243C9DBF878C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2CEA609E-1EB3-4083-88EA-243C9DBF878C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{71BB4DFE-F722-45C4-943E-7A2C5CAFE551}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{71BB4DFE-F722-45C4-943E-7A2C5CAFE551}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{71BB4DFE-F722-45C4-943E-7A2C5CAFE551}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{71BB4DFE-F722-45C4-943E-7A2C5CAFE551}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,16 +1,10 @@
-using System;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using System.Threading.Tasks.Dataflow;
-using System.Web.Mvc;
 using ConcurrentTransactions.API.Channel;
 using ConcurrentTransactions.API.Model;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Scalar.AspNetCore;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,7 +36,6 @@ if (app.Environment.IsDevelopment())
 }
 
 
-app.MapGet("/", () => "Hello World!");
 
 app.MapGet("/accounts/{iban}/transactions", async (string iban, TransactionHandler transactionHandler, CancellationToken cancellationToken) =>
 {
@@ -50,7 +43,7 @@ app.MapGet("/accounts/{iban}/transactions", async (string iban, TransactionHandl
     {
         var (snapshotTime, transactions) = await transactionHandler.GetSnapshotOfConfirmedTransactions(iban);
 
-        return Results.Ok(new
+        return Results.Ok(new SnapshotResponse
         {
             SnapshotTime = snapshotTime,
             Transactions = transactions
@@ -58,7 +51,7 @@ app.MapGet("/accounts/{iban}/transactions", async (string iban, TransactionHandl
     }
     catch (InvalidOperationException ex)
     {
-        return Results.BadRequest(new { Error = ex.Message });
+        return Results.NoContent();
     }
     catch (Exception ex)
     {
@@ -67,20 +60,15 @@ app.MapGet("/accounts/{iban}/transactions", async (string iban, TransactionHandl
 });
 
 
-app.MapPost("/alternate", async (Payment paymentRequest, HttpRequest request, [FromServices] TransactionHandler transactionHandler) =>
+app.MapPost("/payments", async (Payment paymentRequest, HttpRequest request, [FromServices] TransactionHandler transactionHandler) =>
 {
-    if (!request.Headers.TryGetValue("ClientId", out var ClientId))
+    if (!request.Headers.TryGetValue("ClientId", out var clientId) || !int.TryParse(clientId, out var clientIdAsInt))
     {
-        return Results.BadRequest("Missing required header: ClientHeader");
+        return Results.BadRequest(new { Error = "Missing or invalid required header: ClientId." });
     }
-    if (!int.TryParse(ClientId, out var ClientIdAsInt))
-    {
-        return Results.BadRequest("X-Custom-Header must be a valid integer.");
-    }
-    var validationResults = new List<ValidationResult>();
-    var validationContext = new ValidationContext(paymentRequest);
 
-    if (!Validator.TryValidateObject(paymentRequest, validationContext, validationResults, true))
+    var validationResults = new List<ValidationResult>();
+    if (!Validator.TryValidateObject(paymentRequest, new ValidationContext(paymentRequest), validationResults, true))
     {
         return Results.BadRequest(validationResults.Select(v => new
         {
@@ -88,36 +76,31 @@ app.MapPost("/alternate", async (Payment paymentRequest, HttpRequest request, [F
             Error = v.ErrorMessage
         }));
     }
+
+    if (string.Equals(paymentRequest.CreditorAccount?.Trim(), paymentRequest.DebtorAccount?.Trim(), StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { BadRequest = "The CreditorAccount and DebtorAccount cannot be the same." });
+    }
+
     try
     {
-        if (string.Equals(paymentRequest.CreditorAccount.Trim(), paymentRequest.DebtorAccount.Trim(), StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("The CreditorAccount and DebtorAccount cannot be the same.");
-        }
-        paymentRequest.ClientId = ClientIdAsInt;
-        paymentRequest.Timestamp = DateTime.Now;
+        paymentRequest.ClientId = clientIdAsInt;
+        paymentRequest.Timestamp = DateTime.UtcNow; // Use UTC for consistency in timestamps
         await transactionHandler.ProcessTransaction(paymentRequest);
         return Results.Ok(paymentRequest);
-
     }
-    catch(ArgumentException ex)
+    catch (ArgumentException ex)
     {
-       return Results.BadRequest(new { Error = ex.Message });
+        return Results.BadRequest(new { Error = ex.Message });
     }
     catch (InvalidOperationException ex)
     {
-        return Results.Conflict("Conflict: " + ex.Message);
-
+        return Results.Conflict(new { Conflict = ex.Message });
     }
-    catch (Exception ex) 
+    catch (Exception ex)
     {
-        return Results.Conflict("Conflict: " + ex.Message);
-
+        return Results.BadRequest( new { Error = "An unexpected error occurred.", Details = ex.Message });
     }
-
-
- 
-
 });
 
 
@@ -156,3 +139,4 @@ app.MapPost("/", async (HttpRequest request, [FromServices] TransactionHandler t
     // .}\..
 });
 app.Run();
+public partial class Program { }

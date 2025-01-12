@@ -19,7 +19,7 @@ public class Payment
 
     [Required]
     [RegularExpression(@"-?[0-9]{1,14}(\.[0-9]{1,3})?", ErrorMessage = "Invalid format for Amount.")]
-    public required string Amount { get; set; }
+    public required string InstructedAmount { get; set; }
     //public double Amount { get; set; } = default!;
     [AllowNull]
     public DateTime Timestamp { get; set; }

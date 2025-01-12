@@ -1,7 +1,5 @@
 ﻿using ConcurrentTransactions.API.Model;
-using Microsoft.AspNetCore.Http.HttpResults;
 using System.Collections.Concurrent;
-using System.Threading;
 
 namespace ConcurrentTransactions.API.Channel;
 
@@ -17,8 +15,12 @@ public class TransactionHandler
         _logger = logger;
         _tracker = tracker;
     }
-
-    private async Task<bool> InitiateNewTransaction(Payment transactionRequest, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Attempts to make a transaction by first securing semaphores for one client
+    /// and two separate string accounts
+    /// </summary>
+    /// <returns> async Task bool which indicates that a transaction was successful</returns>
+    private async Task<bool> TryMakeNewTransaction(Payment transactionRequest, CancellationToken cancellationToken = default)
     {
         List<Action> cleanupActions = new();
         try
@@ -64,7 +66,11 @@ public class TransactionHandler
             }
         }
     }
-
+    /// <summary>
+    /// Attempts to secure a unique lock, decrementing it's sole PC counter
+    /// After a semaphore is secured successfully, it adds a to-do task in the actionlist,
+    /// </summary>
+    /// <returns> Returns a task</returns>
     private async Task AcquireLockWithCleanup(
     Func<Task<bool>> tryAcquireLock,
     Action releaseLock,
@@ -80,7 +86,11 @@ public class TransactionHandler
         cleanupActions.Add(releaseLock);
     }
 
-
+    /// <summary>
+    /// A wrapper function for issuing a new transction, creates a taskcompletion source token
+    /// which stores a 'receipt' of a committed transaction if it is successful
+    /// </summary>
+    /// <returns> Returns a task</returns>
     public async Task ProcessTransaction(Payment transactionRequest, CancellationToken cancellationToken = default)
     {
         try
@@ -92,10 +102,11 @@ public class TransactionHandler
             }
             
             transactionRequest.TransactionReceipt = new TaskCompletionSource<Transaction>();
-            var success = await InitiateNewTransaction(transactionRequest, cancellationToken);
+            var success = await TryMakeNewTransaction(transactionRequest, cancellationToken);
 
             if (!success)
             {
+                //TODO: Change this
                 var invalidops = new InvalidOperationException("Transaction failed due to lock contention or validation error.");
                 transactionRequest.TransactionReceipt.SetException(
                     invalidops
@@ -116,6 +127,11 @@ public class TransactionHandler
             throw;
         }
     }
+    /// <summary>
+    /// Creates a delay for two seconds and create's a transaction and stores it in
+    /// a concurrent bag.
+    /// </summary>
+    /// <returns> Returns a bool task</returns>
     private async Task<bool> ExecuteTransaction(Payment transaction)
     {
         try
@@ -123,14 +139,14 @@ public class TransactionHandler
             // Simulate transaction processing
             _logger.LogWarning("Transaction underway");
             _tracker.StartTransaction();
-            await Task.Delay(7000);
+            await Task.Delay(2000);
             var payment = new Transaction
             {
                 Id = Guid.NewGuid(),
                 ClientId = transaction.ClientId,
                 DebtorAccount = transaction.DebtorAccount,
                 CreditorAccount = transaction.CreditorAccount,
-                Amount = transaction.Amount,
+                TransactionAmount = transaction.InstructedAmount,
                 TimeStamp = DateTime.Now,
                 Currency = transaction.Currency,
             };
@@ -151,7 +167,11 @@ public class TransactionHandler
             _tracker.EndTransaction();  
         }
     }
-
+    /// <summary>
+    /// Gets or creates client lock. 
+    /// calls AcquireLockSync 
+    /// </summary>
+    /// <returns> Returns a bool task</returns>
     private async Task<bool> TryAcquireClientLock(int clientId, CancellationToken cancellationToken)
     {
         var clientLock = ClientLocks.GetOrAdd(clientId, _ => new SemaphoreSlim(1, 1));
@@ -163,7 +183,11 @@ public class TransactionHandler
         var accountLock = AccountLocks.GetOrAdd(accountKey, _ => new SemaphoreSlim(1, 1));
         return await AcquireLockAsync(accountLock, cancellationToken);
     }
-
+    /// <summary>
+    /// attempts to acquire a specific semaphore
+    /// if the counter is already zero, then return false
+    /// </summary>
+    /// <returns> Returns a bool task</returns>
     private async Task<bool> AcquireLockAsync(SemaphoreSlim semaphore, CancellationToken cancellation)
     {
         try
@@ -176,7 +200,11 @@ public class TransactionHandler
             return false;
         }
     }
-
+    /// <summary>
+    /// Releases the semaphore, restoring its counter to 1
+    /// 
+    /// </summary>
+    ///
     private void ReleaseClientLock(int clientId)
     {
         if (ClientLocks.TryGetValue(clientId, out var clientLock))
@@ -212,6 +240,10 @@ public class TransactionHandler
         
         try
         {
+            if (!AccountLocks.ContainsKey(IBAN))
+            {
+                throw new KeyNotFoundException("Account not found");
+            }
             if (_tracker.CheckIfAnyTransactionUnderway())
             {
                 throw new InvalidOperationException("A transaction is already underway. Please try again later");
@@ -224,10 +256,10 @@ public class TransactionHandler
             {
                 var snapshotTime = DateTime.Now;
                 var snapshot = SuccessfulPayments
-                             .Where(transaction =>
-                                          string.Equals(transaction.DebtorAccount, IBAN, StringComparison.OrdinalIgnoreCase) ||
-                                             string.Equals(transaction.CreditorAccount, IBAN, StringComparison.OrdinalIgnoreCase))
-                                            .ToList();
+                              .Where(transaction =>
+                               string.Equals(transaction.DebtorAccount, IBAN, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(transaction.CreditorAccount, IBAN, StringComparison.OrdinalIgnoreCase))
+                               .ToList();
 
                 return (snapshotTime,snapshot);
             }
