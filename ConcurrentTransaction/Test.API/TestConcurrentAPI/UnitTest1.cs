@@ -8,6 +8,7 @@ using ConcurrentTransactions.API.Model;
 using FluentAssertions;
 using System.Threading.Tasks;
 using System.Web.Mvc;
+using System.Diagnostics;
 
 namespace TestConcurrentAPI
 {
@@ -47,6 +48,65 @@ namespace TestConcurrentAPI
             var result = await response.Content.ReadFromJsonAsync<Payment>();
             result.Should().NotBeNull();
             
+
+        }
+        [Fact]
+        public async Task PostPayment_ReturnsOk_WithAllUniquePayments()
+        {
+
+            var firstPayment = new Payment
+            {
+                ClientId = 1,
+                DebtorAccount = "DebtorA",
+                CreditorAccount = "CreditorB",
+                InstructedAmount = "100.0",
+                Currency = "USD"
+            };
+
+            var secondPayment = new Payment
+            {
+                ClientId = 2,
+                DebtorAccount = "CreditorF",
+                CreditorAccount = "CreditorC",
+                InstructedAmount = "200.0",
+                Currency = "USD"
+            };
+
+            var thirdPayment = new Payment
+            {
+                ClientId = 3,
+                DebtorAccount = "DebtorD",
+                CreditorAccount = "CreditorE",
+                InstructedAmount = "300.0",
+                Currency = "USD"
+            };
+
+            await using var application = new WebApplicationFactory<Program>();
+            using var client = application.CreateClient();
+
+            HttpRequestMessage CreateRequest(string clientId, Payment payment) =>
+                new HttpRequestMessage(HttpMethod.Post, "/payments")
+                {
+                    Content = JsonContent.Create(payment),
+                    Headers =
+                    {
+                { "ClientId", clientId }
+                    }
+                };
+
+            var stopwatch1 = Stopwatch.StartNew();
+            var task1 = Task.Run(() => client.SendAsync(CreateRequest("1", firstPayment)));
+            var task2 = Task.Run(() => client.SendAsync(CreateRequest("2", secondPayment)));
+            var task3 = Task.Run(() => client.SendAsync(CreateRequest("3", thirdPayment)));
+
+
+            var responses = await Task.WhenAll(task1, task2, task3);
+            stopwatch1.Stop();
+            Console.WriteLine($"Time elapsed after Function1: {stopwatch1.Elapsed.TotalSeconds} seconds");
+            responses[0].StatusCode.Should().Be(HttpStatusCode.OK);
+            responses[1].StatusCode.Should().Be(HttpStatusCode.OK);
+            responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
+
 
         }
         [Fact]
@@ -212,7 +272,7 @@ namespace TestConcurrentAPI
 
 
             var task1 = Task.Run(() => client.SendAsync(CreateRequest("1", firstPayment)));
-            await Task.Delay(3000); // Delay the second payment
+            await Task.Delay(2100); // Delay the second payment
             var task2 = Task.Run(() => client.SendAsync(CreateRequest("2", secondPayment)));
             var task3 = Task.Run(() => client.SendAsync(CreateRequest("3", thirdPayment)));
 

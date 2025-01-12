@@ -12,6 +12,7 @@ public class Transaction
 
 
 }
+
 public class SnapshotResponse
 {
     public DateTime SnapshotTime { get; set; }

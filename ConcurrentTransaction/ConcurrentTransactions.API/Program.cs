@@ -15,7 +15,7 @@ builder.Logging.AddDebug();
 
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<TransactionTracker>();
-
+builder.Services.AddSingleton<SemaphorHandler>();
 builder.Services.AddSingleton<TransactionHandler>();
 
 var app = builder.Build();
@@ -85,7 +85,7 @@ app.MapPost("/payments", async (Payment paymentRequest, HttpRequest request, [Fr
     try
     {
         paymentRequest.ClientId = clientIdAsInt;
-        paymentRequest.Timestamp = DateTime.UtcNow; // Use UTC for consistency in timestamps
+        paymentRequest.Timestamp = DateTime.Now;
         await transactionHandler.ProcessTransaction(paymentRequest);
         return Results.Ok(paymentRequest);
     }

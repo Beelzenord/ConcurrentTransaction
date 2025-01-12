@@ -1,5 +1,6 @@
 ﻿using ConcurrentTransactions.API.Model;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace ConcurrentTransactions.API.Channel;
 
@@ -10,10 +11,12 @@ public class TransactionHandler
     private ConcurrentBag<Transaction> SuccessfulPayments = new();
     private readonly ILogger<TransactionHandler> _logger;
     private readonly TransactionTracker _tracker;
-    public TransactionHandler(ILogger<TransactionHandler> logger, TransactionTracker tracker)
+    private readonly SemaphorHandler _semaphoreHandler;
+    public TransactionHandler(ILogger<TransactionHandler> logger, TransactionTracker tracker, SemaphorHandler semaphorHandler)
     {
         _logger = logger;
         _tracker = tracker;
+        _semaphoreHandler = semaphorHandler;
     }
     /// <summary>
     /// Attempts to make a transaction by first securing semaphores for one client
@@ -22,9 +25,25 @@ public class TransactionHandler
     /// <returns> async Task bool which indicates that a transaction was successful</returns>
     private async Task<bool> TryMakeNewTransaction(Payment transactionRequest, CancellationToken cancellationToken = default)
     {
+           
         List<Action> cleanupActions = new();
+        Stopwatch stopwatch1 = new Stopwatch();
         try
         {
+            stopwatch1 = Stopwatch.StartNew();
+            var canUserDoTransaction = await _semaphoreHandler.TrySecureAccess(transactionRequest, cleanupActions);
+          //  stopwatch.Stop();
+         //   Console.WriteLine($"Time elapsed after Function1: {stopwatch.Elapsed.TotalSeconds} seconds");
+            if (!canUserDoTransaction) 
+            {
+                return false;
+            }
+            else
+            {
+               return await ExecuteTransaction(transactionRequest);
+
+            }
+            /*
             await AcquireLockWithCleanup(
                 () => TryAcquireClientLock(transactionRequest.ClientId, cancellationToken),
                 () => ReleaseClientLock(transactionRequest.ClientId),
@@ -42,7 +61,7 @@ public class TransactionHandler
                 () => ReleaseAccountLock(transactionRequest.CreditorAccount),
                 $"Failed to acquire tier-3 lock for CreditorAccount: {transactionRequest.CreditorAccount}",
                 cleanupActions);
-
+            */
             return await ExecuteTransaction(transactionRequest);
         }
         catch (Exception ex)
@@ -52,18 +71,20 @@ public class TransactionHandler
         }
         finally
         {
-            
-            foreach (var cleanupAction in cleanupActions)
-            {
-                try
-                {
-                    cleanupAction();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error during lock cleanup.");
-                }
-            }
+            _semaphoreHandler.PerformCleanupAction(cleanupActions);
+            stopwatch1.Stop();
+            Console.WriteLine($"Time elapsed after Function1: {stopwatch1.Elapsed.TotalSeconds} seconds");
+            /* foreach (var cleanupAction in cleanupActions)
+             {
+                 try
+                 {
+                     cleanupAction();
+                 }
+                 catch (Exception ex)
+                 {
+                     _logger.LogError(ex, "Error during lock cleanup.");
+                 }
+             }*/
         }
     }
     /// <summary>
@@ -102,8 +123,11 @@ public class TransactionHandler
             }
             
             transactionRequest.TransactionReceipt = new TaskCompletionSource<Transaction>();
-            var success = await TryMakeNewTransaction(transactionRequest, cancellationToken);
+            var stopwatch2 = Stopwatch.StartNew();
 
+            var success = await TryMakeNewTransaction(transactionRequest, cancellationToken);
+            stopwatch2.Stop();
+            Console.WriteLine($"Time elapsed after Function1: {stopwatch2.Elapsed.TotalSeconds} seconds");
             if (!success)
             {
                 //TODO: Change this
@@ -172,7 +196,7 @@ public class TransactionHandler
     /// calls AcquireLockSync 
     /// </summary>
     /// <returns> Returns a bool task</returns>
-    private async Task<bool> TryAcquireClientLock(int clientId, CancellationToken cancellationToken)
+    /*private async Task<bool> TryAcquireClientLock(int clientId, CancellationToken cancellationToken)
     {
         var clientLock = ClientLocks.GetOrAdd(clientId, _ => new SemaphoreSlim(1, 1));
         return await AcquireLockAsync(clientLock, cancellationToken);
@@ -234,13 +258,13 @@ public class TransactionHandler
             }
         }
     }
-
+    */
     public async Task<(DateTime SnapshotTime, List<Transaction> Transactions)> GetSnapshotOfConfirmedTransactions(string IBAN)
     {
         
         try
         {
-            if (!AccountLocks.ContainsKey(IBAN))
+            if (!_semaphoreHandler.ContainsAccount(IBAN))
             {
                 throw new KeyNotFoundException("Account not found");
             }
@@ -248,7 +272,7 @@ public class TransactionHandler
             {
                 throw new InvalidOperationException("A transaction is already underway. Please try again later");
             }
-            if (!await TryAcquireAccountLock(IBAN))
+            if (!await _semaphoreHandler.TryAccessAccount(IBAN))
             {
                 throw new InvalidOperationException("A transaction with that account detail is underway. Please try again later");
             }
@@ -269,7 +293,7 @@ public class TransactionHandler
             }
             finally
             {
-                ReleaseAccountLock(IBAN);
+                _semaphoreHandler.StopLookingAtAccount(IBAN);
             }
 
         }
