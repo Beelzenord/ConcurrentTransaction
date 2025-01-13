@@ -1,4 +1,4 @@
-his software is a minimalistic API with small but robust logic that handles concurrent transactions. It relies on atomic operations to avert the risks of multithreaded environments, some of which includes race conditions and dirty reads. 
+This software is a minimalistic API with small but robust logic that handles concurrent transactions. It relies on atomic operations to avert the risks of multithreaded environments, some of which includes race conditions and dirty reads. 
 
 Has two API methods, a http get and http post. 
 httpget /accounts/{iban}/transactions retrieves all transactions involving the iban string in its request parameter and also a timestamp representing the ‘snapshot’ of when that data was extracted. But only if there is no transaction underway.
