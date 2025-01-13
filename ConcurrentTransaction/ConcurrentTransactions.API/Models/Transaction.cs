@@ -1,5 +1,8 @@
 ﻿ 
 namespace ConcurrentTransactions.API.Model;
+/// <summary>
+/// Represents a transaction object which was conducted successfully
+/// </summary>
 public class Transaction
 {
     public required Guid Id { get; set; } = Guid.NewGuid();
@@ -16,5 +19,5 @@ public class Transaction
 public class SnapshotResponse
 {
     public DateTime SnapshotTime { get; set; }
-    public List<Transaction> Transactions { get; set; }
+    public List<Transaction>? Transactions { get; set; }
 }

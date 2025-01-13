@@ -1,22 +1,20 @@
-using System.ComponentModel.DataAnnotations;
-using System.Text.Json;
 using ConcurrentTransactions.API.Channel;
 using ConcurrentTransactions.API.Model;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Scalar.AspNetCore;
+using System.ComponentModel.DataAnnotations;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole(); 
-builder.Logging.AddDebug();    
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 
 
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<TransactionTracker>();
-builder.Services.AddSingleton<SemaphorHandler>();
 builder.Services.AddSingleton<TransactionHandler>();
+
 
 var app = builder.Build();
 
@@ -30,18 +28,21 @@ if (app.Environment.IsDevelopment())
             options.WithTitle("Test Transactions");
             options.WithTheme(ScalarTheme.DeepSpace);
             options.WithSidebar(true);
-         });
+        });
 
     }
 }
 
 
-
-app.MapGet("/accounts/{iban}/transactions", async (string iban, TransactionHandler transactionHandler, CancellationToken cancellationToken) =>
+/// <summary>
+/// Gets a list of successful transactions associated with this IBAN, if no other transaction is underway
+/// </summary>
+/// <returns> Returns a DateTime and List<Transaction> tuple </Transaction></returns>
+app.MapGet("/accounts/{iban}/transactions", (string iban, TransactionHandler transactionHandler, CancellationToken cancellationToken) =>
 {
     try
     {
-        var (snapshotTime, transactions) = await transactionHandler.GetSnapshotOfConfirmedTransactions(iban);
+        var (snapshotTime, transactions) = transactionHandler.GetSnapshotOfConfirmedTransactions(iban);
 
         return Results.Ok(new SnapshotResponse
         {
@@ -59,84 +60,71 @@ app.MapGet("/accounts/{iban}/transactions", async (string iban, TransactionHandl
     }
 });
 
-
+/// <summary>
+/// Posts a payment re
+/// </summary>
+/// <returns> Returns a DateTime and List<Transaction> tuple </Transaction></returns>
 app.MapPost("/payments", async (Payment paymentRequest, HttpRequest request, [FromServices] TransactionHandler transactionHandler) =>
 {
+    // Validate ClientId header
     if (!request.Headers.TryGetValue("ClientId", out var clientId) || !int.TryParse(clientId, out var clientIdAsInt))
     {
-        return Results.BadRequest(new { Error = "Missing or invalid required header: ClientId." });
+        throw new ArgumentException("Missing or invalid required header: ClientId.");
     }
 
+    // Validate payment request
     var validationResults = new List<ValidationResult>();
     if (!Validator.TryValidateObject(paymentRequest, new ValidationContext(paymentRequest), validationResults, true))
     {
-        return Results.BadRequest(validationResults.Select(v => new
-        {
-            Field = v.MemberNames.FirstOrDefault() ?? "General",
-            Error = v.ErrorMessage
-        }));
+        throw new ValidationException($"Validation failed: {string.Join(", ", validationResults.Select(v => v.ErrorMessage))}");
     }
 
+    // Check for identical accounts
     if (string.Equals(paymentRequest.CreditorAccount?.Trim(), paymentRequest.DebtorAccount?.Trim(), StringComparison.OrdinalIgnoreCase))
     {
-        return Results.BadRequest(new { BadRequest = "The CreditorAccount and DebtorAccount cannot be the same." });
+        throw new ArgumentException("The CreditorAccount and DebtorAccount cannot be the same.");
     }
 
+    // Process transaction
+    paymentRequest.ClientId = clientIdAsInt;
+    paymentRequest.Timestamp = DateTime.Now;
+    await transactionHandler.TryProcessNewTransaction(paymentRequest);
+
+    return Results.Ok(paymentRequest);
+});
+
+//Custom API error handler
+app.Use(async (context, next) =>
+{
     try
     {
-        paymentRequest.ClientId = clientIdAsInt;
-        paymentRequest.Timestamp = DateTime.Now;
-        await transactionHandler.ProcessTransaction(paymentRequest);
-        return Results.Ok(paymentRequest);
+        await next();
     }
     catch (ArgumentException ex)
     {
-        return Results.BadRequest(new { Error = ex.Message });
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { Error = ex.Message });
+    }
+    catch (ValidationException ex)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { ValidationErrors = ex.Message });
     }
     catch (InvalidOperationException ex)
     {
-        return Results.Conflict(new { Conflict = ex.Message });
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { Conflict = ex.Message });
     }
     catch (Exception ex)
     {
-        return Results.BadRequest( new { Error = "An unexpected error occurred.", Details = ex.Message });
-    }
-});
-
-
-app.MapPost("/", async (HttpRequest request, [FromServices] TransactionHandler transactionHandler) =>
-{
-
-
-   if (!request.Headers.TryGetValue("ClientId", out var ClientId))
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new
         {
-            return Results.BadRequest("Missing required header: ClientHeader");
-        }
-    if (!int.TryParse(ClientId, out var ClientIdAsInt))
-    {
-        return Results.BadRequest("X-Custom-Header must be a valid integer.");
+            Error = "An unexpected error occurred.",
+            Details = ex.Message
+        });
     }
-
-    try
-    {
-        // Deserialize the request body into the object
-        var requestBody = await JsonSerializer.DeserializeAsync<Payment>(request.Body);
-        
-        if (requestBody == null)
-        {
-            return Results.BadRequest("Invalid or missing request body.");
-        }
-        var  validationResults = new List<ValidationResult>();
-       
-        requestBody.ClientId = ClientIdAsInt;
-        await transactionHandler.ProcessTransaction(requestBody);
-        return Results.Ok(requestBody);
-
-    }
-    catch (Exception ex) { 
-            return Results.BadRequest(ex.Message);  
-    }
-    // .}\..
 });
 app.Run();
+//Expose API for xunit
 public partial class Program { }

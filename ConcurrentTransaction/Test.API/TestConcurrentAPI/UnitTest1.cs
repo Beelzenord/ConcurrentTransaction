@@ -1,29 +1,18 @@
-﻿using ConcurrentTransactions.API.Channel;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.VisualStudio.TestPlatform.TestHost;
-using System.Net.Http.Json;
-using System.Net;
-using Moq;
-using ConcurrentTransactions.API.Model;
+﻿using ConcurrentTransactions.API.Model;
 using FluentAssertions;
-using System.Threading.Tasks;
-using System.Web.Mvc;
+using Microsoft.AspNetCore.Mvc.Testing;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Json;
 
 namespace TestConcurrentAPI
 {
-    public class UnitTest1 : IClassFixture<WebApplicationFactory<Program>>
+    public class UnitTest1
     {
-        private readonly WebApplicationFactory<Program> _factory;
-       
-        public UnitTest1(WebApplicationFactory<Program> factory)
+
+        [Fact]
+        public async Task PostPaymentOneTransactionReturnsOk()
         {
-            _factory = factory;
-        }
-      
-            [Fact]
-            public async Task MakeOneTransaction()
-           {
             await using var application = new WebApplicationFactory<Program>();
             using var client = application.CreateClient();
             var payment = new Payment
@@ -40,14 +29,14 @@ namespace TestConcurrentAPI
 
             request.Headers.Add("ClientId", "12345");
 
-              
+
             var response = await client.SendAsync(request);
 
-             
+
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             var result = await response.Content.ReadFromJsonAsync<Payment>();
             result.Should().NotBeNull();
-            
+
 
         }
         [Fact]
@@ -110,7 +99,7 @@ namespace TestConcurrentAPI
 
         }
         [Fact]
-        public async Task PostPayment_ReturnsOk_WhenTransactionSucceeds()
+        public async Task PostPayment_ReturnsOk_WhenTransactionSucceedsWithDelayAndRepeatValues()
         {
 
             var firstPayment = new Payment
@@ -163,7 +152,7 @@ namespace TestConcurrentAPI
             var responses = await Task.WhenAll(task1, task2, task3);
 
             responses[0].StatusCode.Should().Be(HttpStatusCode.OK);
-            responses[1].StatusCode.Should().Be(HttpStatusCode.OK); 
+            responses[1].StatusCode.Should().Be(HttpStatusCode.OK);
             responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
 
 
@@ -184,7 +173,7 @@ namespace TestConcurrentAPI
             var secondPayment = new Payment
             {
                 ClientId = 2,
-                DebtorAccount = "CreditorB",  
+                DebtorAccount = "CreditorB",
                 CreditorAccount = "CreditorC",
                 InstructedAmount = "200.0",
                 Currency = "USD"
@@ -195,7 +184,7 @@ namespace TestConcurrentAPI
                 ClientId = 3,
                 DebtorAccount = "DebtorD",
                 CreditorAccount = "CreditorE",
-                InstructedAmount ="300.0",
+                InstructedAmount = "300.0",
                 Currency = "USD"
             };
 
@@ -212,7 +201,121 @@ namespace TestConcurrentAPI
                     }
                 };
 
-           
+
+            var task1 = Task.Run(() => client.SendAsync(CreateRequest("1", firstPayment)));
+            await Task.Delay(500); // Delay the second payment
+            var task2 = Task.Run(() => client.SendAsync(CreateRequest("2", secondPayment)));
+            var task3 = Task.Run(() => client.SendAsync(CreateRequest("3", thirdPayment)));
+
+
+            var responses = await Task.WhenAll(task1, task2, task3);
+
+            responses[0].StatusCode.Should().Be(HttpStatusCode.OK);
+            responses[1].StatusCode.Should().Be(HttpStatusCode.Conflict); // this task should conflict 
+            responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        [Fact]
+        public async Task PostPayment_ReturnsOk_WhenTransactionSucceedsOneWillConflictEvenWithCaselLettersDiffering()
+        {
+
+            var firstPayment = new Payment
+            {
+                ClientId = 1,
+                DebtorAccount = "DebtorA",
+                CreditorAccount = "CreditorB",
+                InstructedAmount = "100.0",
+                Currency = "USD"
+            };
+
+            var secondPayment = new Payment
+            {
+                ClientId = 2,
+                DebtorAccount = "creditorb", //Should read the same as CreditorB
+                CreditorAccount = "CreditorC",
+                InstructedAmount = "200.0",
+                Currency = "USD"
+            };
+
+            var thirdPayment = new Payment
+            {
+                ClientId = 3,
+                DebtorAccount = "DebtorD",
+                CreditorAccount = "CreditorE",
+                InstructedAmount = "300.0",
+                Currency = "USD"
+            };
+
+            await using var application = new WebApplicationFactory<Program>();
+            using var client = application.CreateClient();
+
+            HttpRequestMessage CreateRequest(string clientId, Payment payment) =>
+                new HttpRequestMessage(HttpMethod.Post, "/payments")
+                {
+                    Content = JsonContent.Create(payment),
+                    Headers =
+                    {
+                { "ClientId", clientId }
+                    }
+                };
+
+
+            var task1 = Task.Run(() => client.SendAsync(CreateRequest("1", firstPayment)));
+            await Task.Delay(500); // Delay the second payment
+            var task2 = Task.Run(() => client.SendAsync(CreateRequest("2", secondPayment)));
+            var task3 = Task.Run(() => client.SendAsync(CreateRequest("3", thirdPayment)));
+
+
+            var responses = await Task.WhenAll(task1, task2, task3);
+
+            responses[0].StatusCode.Should().Be(HttpStatusCode.OK);
+            responses[1].StatusCode.Should().Be(HttpStatusCode.Conflict); // this task should conflict 
+            responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        [Fact]
+        public async Task PostPayment_ReturnsOk_WhenTransactionSucceedsOneWillConflictEvenWithSpacing()
+        {
+
+            var firstPayment = new Payment
+            {
+                ClientId = 1,
+                DebtorAccount = "DebtorA",
+                CreditorAccount = "CreditorB",
+                InstructedAmount = "100.0",
+                Currency = "USD"
+            };
+
+            var secondPayment = new Payment
+            {
+                ClientId = 2,
+                DebtorAccount = " creditorb ",
+                CreditorAccount = "CreditorC",
+                InstructedAmount = "200.0",
+                Currency = "USD"
+            };
+
+            var thirdPayment = new Payment
+            {
+                ClientId = 3,
+                DebtorAccount = "DebtorD",
+                CreditorAccount = "CreditorE",
+                InstructedAmount = "300.0",
+                Currency = "USD"
+            };
+
+            await using var application = new WebApplicationFactory<Program>();
+            using var client = application.CreateClient();
+
+            HttpRequestMessage CreateRequest(string clientId, Payment payment) =>
+                new HttpRequestMessage(HttpMethod.Post, "/payments")
+                {
+                    Content = JsonContent.Create(payment),
+                    Headers =
+                    {
+                { "ClientId", clientId }
+                    }
+                };
+
+
             var task1 = Task.Run(() => client.SendAsync(CreateRequest("1", firstPayment)));
             await Task.Delay(1000); // Delay the second payment
             var task2 = Task.Run(() => client.SendAsync(CreateRequest("2", secondPayment)));
@@ -223,7 +326,7 @@ namespace TestConcurrentAPI
 
             responses[0].StatusCode.Should().Be(HttpStatusCode.OK);
             responses[1].StatusCode.Should().Be(HttpStatusCode.Conflict); // this task should conflict 
-            responses[2].StatusCode.Should().Be(HttpStatusCode.OK);   
+            responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
         [Fact]
@@ -284,12 +387,12 @@ namespace TestConcurrentAPI
             responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
 
             await Task.Delay(2500);
-              var iban = "CreditorB";
+            var iban = "CreditorB";
             var getResponse = await client.GetAsync($"/accounts/{iban}/transactions");
 
             getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             var getResult = await getResponse.Content.ReadFromJsonAsync<SnapshotResponse>();
-            
+
             getResult.Should().NotBeNull();
             getResult!.Transactions.Should().HaveCount(2); // CreditorB appears in two transactions
             getResult.Transactions.Should().Contain(t => t.DebtorAccount == "CreditorB" && t.CreditorAccount == "CreditorC");
@@ -299,7 +402,7 @@ namespace TestConcurrentAPI
             getResult.Transactions.Should().Contain(t => t.DebtorAccount == "DebtorA" && t.CreditorAccount == "CreditorB");
             getResult.Transactions.Should().Contain(t => t.DebtorAccount == "CreditorB" && t.CreditorAccount == "CreditorC");
 
-          
+
         }
 
         [Fact]
@@ -348,19 +451,19 @@ namespace TestConcurrentAPI
 
             var iban = "CreditorE";
             var task1 = Task.Run(() => client.SendAsync(CreateRequest("1", firstPayment)));
-            await Task.Delay(3000); 
+            await Task.Delay(3000);
             var task2 = Task.Run(() => client.SendAsync(CreateRequest("2", secondPayment)));
             var task3 = Task.Run(() => client.SendAsync(CreateRequest("3", thirdPayment)));
             var task4 = Task.Run(() => client.GetAsync($"/accounts/{iban}/transactions"));
 
-            var responses = await Task.WhenAll(task1, task2, task3,task4);
+            var responses = await Task.WhenAll(task1, task2, task3, task4);
 
             responses[0].StatusCode.Should().Be(HttpStatusCode.OK);
-            responses[1].StatusCode.Should().Be(HttpStatusCode.OK); 
+            responses[1].StatusCode.Should().Be(HttpStatusCode.OK);
             responses[2].StatusCode.Should().Be(HttpStatusCode.OK);
             responses[3].StatusCode.Should().Be(HttpStatusCode.NoContent);
-             
-            
+
+
             var getResponse = await client.GetAsync($"/accounts/{iban}/transactions");
 
         }
